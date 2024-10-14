@@ -1,5 +1,6 @@
 import requests
 import json
+import gradio as gr
 
 labr_token_balance = None
 wtrx_token_balance = None
@@ -31,10 +32,6 @@ def fetch_data() -> None:
     fetch_price()
     latest_labr_price = wtrx_token_balance / labr_token_balance * wtrx_price_in_usd
 
-    if labr_token_balance is None or wtrx_token_balance is None or wtrx_price_in_usd is None:
-        print('Error while fetching data. Try again later.')
-        exit(-1)
-
 def calculate_slippage(token_x_balance: int, token_y_balance: int, delta_x: int, delta_y: int) -> float:
     return (delta_x / delta_y) - (token_x_balance / token_y_balance)
 
@@ -53,33 +50,57 @@ def calculate_price_after_selling(token_x_balance: int, token_y_balance: int, de
     new_token_y_balance = token_y_balance + delta_y
     return (new_token_x_balance / new_token_y_balance) * (1 - slippage)
 
-def main():
-    tx_type_choice = int(input('Choose the transaction type: Selling (0) / Buying (1)\n'))
-
-    if tx_type_choice == 0:
-        labr_amount = int(input('Enter the amount in LABR:'))
-        new_labr_price = calculate_price_after_selling(wtrx_token_balance, labr_token_balance, labr_amount) * wtrx_price_in_usd
-        print(f'Price after selling: {new_labr_price:.6f}$')
-        print(f'Price would change by {(new_labr_price - latest_labr_price):.6f}$ ({((new_labr_price - latest_labr_price) / latest_labr_price * 100):.1f}%)')
-    elif tx_type_choice == 1:
-        currency_choice = int(input('Choose the currency: USD (0) / TRX (1)\n'))
-        if currency_choice == 0:
-            amount_in_usd = int(input('Enter the amount in USD:'))
-            amount_in_wtrx = amount_in_usd / wtrx_price_in_usd
-        elif currency_choice == 1:
-            amount_in_wtrx = int(input('Enter the amount in TRX:'))
-        else:
-            print('Wrong choice. Try again.')
-            exit(-1)
-        new_labr_price = calculate_price_after_buying(wtrx_token_balance, labr_token_balance, amount_in_wtrx) * wtrx_price_in_usd
-        print(f'Price after buying: {new_labr_price:.6f}$')
-        print(f'Price would change by {(new_labr_price - latest_labr_price):.6f}$ ({((new_labr_price - latest_labr_price) / latest_labr_price * 100):.1f}%)')
-    else:
-        print('Wrong choice. Try again.')
-        exit(-1)
-        
-
-if __name__ == '__main__':
+def process_transaction(tx_type, currency_choice, amount):
     fetch_data()
-    print(f'Current LABR price: {latest_labr_price:.6f}$')
-    main()
+    
+    if tx_type == 'Selling':
+        new_labr_price = calculate_price_after_selling(wtrx_token_balance, labr_token_balance, amount) * wtrx_price_in_usd
+        price_change = (new_labr_price - latest_labr_price)
+        percentage_change = (price_change / latest_labr_price) * 100
+        return f'Price after selling: {new_labr_price:.6f}$\nPrice would change by {price_change:.6f}$ ({percentage_change:.1f}%)'
+
+    elif tx_type == 'Buying':
+        if currency_choice == 'USD':
+            amount_in_wtrx = amount / wtrx_price_in_usd
+        elif currency_choice == 'TRX':
+            amount_in_wtrx = amount
+
+        new_labr_price = calculate_price_after_buying(wtrx_token_balance, labr_token_balance, amount_in_wtrx) * wtrx_price_in_usd
+        price_change = (new_labr_price - latest_labr_price)
+        percentage_change = (price_change / latest_labr_price) * 100
+        return f'Price after buying: {new_labr_price:.6f}$\nPrice would change by {price_change:.6f}$ ({percentage_change:.1f}%)'
+
+# Функция для обновления состояния выбора валюты
+def update_currency_dropdown(tx_type):
+    if tx_type == "Selling":
+        return gr.update(visible=True, interactive=False)  # Отключаем поле выбора валюты для продажи
+    else:
+        return gr.update(visible=True, interactive=True)   # Включаем поле выбора валюты для покупки
+
+# Используем gr.Blocks для создания динамических обновлений
+with gr.Blocks() as gr_interface:
+    tx_type_dropdown = gr.Dropdown(
+        ["Selling", "Buying"], 
+        label="Transaction Type", 
+        value="Buying"
+    )
+
+    currency_dropdown = gr.Dropdown(
+        ["USD", "TRX"], 
+        label="Currency (for Buying)", 
+        value="TRX"
+    )
+
+    amount_input = gr.Number(label="Enter Amount")
+    output_text = gr.Textbox(label="Output")
+
+    # Добавляем обработчик для изменения состояния выбора валюты
+    tx_type_dropdown.change(fn=update_currency_dropdown, inputs=[tx_type_dropdown], outputs=[currency_dropdown])
+
+    # Кнопка для запуска транзакции
+    submit_btn = gr.Button("Submit")
+    submit_btn.click(fn=process_transaction, inputs=[tx_type_dropdown, currency_dropdown, amount_input], outputs=output_text)
+
+if __name__ == "__main__":
+    fetch_data()  # Предварительное извлечение данных
+    gr_interface.launch()
